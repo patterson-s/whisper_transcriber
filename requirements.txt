@@ -2,3 +2,4 @@ openai-whisper
 torch
 ffmpeg-python
 streamlit
+streamlit-mic-recorder==0.0.8
