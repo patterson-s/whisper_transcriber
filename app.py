@@ -39,16 +39,10 @@ def send_to_discord(transcript: str, source: str = "transcription") -> bool:
         st.error("Discord webhook URL not configured")
         return False
     
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    header = f"🎤 **Whisper Transcription**\n📅 {timestamp}\n📝 Source: {source}\n\n"
-    
-    full_message = header + transcript
-    
-    if len(full_message) <= DISCORD_MESSAGE_LIMIT:
-        return send_single_message(webhook_url, full_message)
+    if len(transcript) <= DISCORD_MESSAGE_LIMIT:
+        return send_single_message(webhook_url, transcript)
     else:
-        return send_chunked_messages(webhook_url, header, transcript)
+        return send_chunked_messages(webhook_url, transcript)
 
 def send_single_message(webhook_url: str, message: str) -> bool:
     try:
@@ -59,11 +53,8 @@ def send_single_message(webhook_url: str, message: str) -> bool:
         st.error(f"Error sending to Discord: {str(e)}")
         return False
 
-def send_chunked_messages(webhook_url: str, header: str, transcript: str) -> bool:
+def send_chunked_messages(webhook_url: str, transcript: str) -> bool:
     try:
-        if not send_single_message(webhook_url, header):
-            return False
-        
         chunk_size = DISCORD_MESSAGE_LIMIT - 50
         chunks = [transcript[i:i+chunk_size] for i in range(0, len(transcript), chunk_size)]
         
