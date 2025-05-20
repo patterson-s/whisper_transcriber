@@ -7,6 +7,7 @@ from typing import Optional, Dict
 import time
 from streamlit_mic_recorder import mic_recorder
 import datetime
+import streamlit.components.v1 as components
 
 SUPPORTED_FORMATS = ['.mp3', '.m4a', '.wav', '.ogg', '.mp4']
 MODEL_NAME = "base"
@@ -27,6 +28,81 @@ class AudioTranscriber:
         except Exception as e:
             st.error(f"Error transcribing file: {str(e)}")
             return None
+
+def copy_to_clipboard_component(text: str, button_text: str = "Copy to Clipboard"):
+    escaped_text = text.replace('`', '\\`').replace('\\', '\\\\').replace('"', '\\"')
+    
+    copy_button_html = f"""
+    <div>
+        <button onclick="copyToClipboard()" style="
+            background-color: #ff4b4b;
+            color: white;
+            border: none;
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 400;
+            line-height: 1.6;
+            text-align: center;
+            text-decoration: none;
+            white-space: nowrap;
+            margin: 0;
+        ">{button_text}</button>
+        <span id="copy-feedback" style="
+            margin-left: 10px;
+            color: green;
+            font-size: 0.875rem;
+            display: none;
+        ">Copied!</span>
+    </div>
+    
+    <script>
+    function copyToClipboard() {{
+        const text = `{escaped_text}`;
+        
+        if (navigator.clipboard && window.isSecureContext) {{
+            navigator.clipboard.writeText(text).then(function() {{
+                showFeedback();
+            }}).catch(function(err) {{
+                fallbackCopyTextToClipboard(text);
+            }});
+        }} else {{
+            fallbackCopyTextToClipboard(text);
+        }}
+    }}
+    
+    function fallbackCopyTextToClipboard(text) {{
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.top = "0";
+        textArea.style.left = "0";
+        textArea.style.position = "fixed";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {{
+            document.execCommand('copy');
+            showFeedback();
+        }} catch (err) {{
+            console.error('Fallback: Oops, unable to copy', err);
+        }}
+        
+        document.body.removeChild(textArea);
+    }}
+    
+    function showFeedback() {{
+        const feedback = document.getElementById('copy-feedback');
+        feedback.style.display = 'inline';
+        setTimeout(function() {{
+            feedback.style.display = 'none';
+        }}, 2000);
+    }}
+    </script>
+    """
+    
+    components.html(copy_button_html, height=50)
 
 def process_files(transcriber: AudioTranscriber, files) -> Dict[str, str]:
     transcriptions = {}
@@ -68,7 +144,6 @@ def process_files(transcriber: AudioTranscriber, files) -> Dict[str, str]:
     return transcriptions
 
 def save_audio_file(audio_data):
-    """Save audio bytes to a temporary file."""
     if not audio_data or 'bytes' not in audio_data:
         return None
     
@@ -77,18 +152,15 @@ def save_audio_file(audio_data):
         return tmp_file.name
 
 def transcribe_audio(audio_data):
-    """Transcribe audio data and return the transcription text."""
     if not audio_data or 'bytes' not in audio_data:
         return None
         
-    # Save the audio to a temporary file
     audio_path = save_audio_file(audio_data)
     
     if not audio_path:
         return None
         
     try:
-        # Transcribe the audio
         transcriber = AudioTranscriber()
         transcription = transcriber.transcribe_file(audio_path)
         return transcription
@@ -96,14 +168,12 @@ def transcribe_audio(audio_data):
         st.error(f"Error transcribing audio: {str(e)}")
         return None
     finally:
-        # Clean up the temporary file
         try:
             os.unlink(audio_path)
         except:
             pass
 
 def initialize_session_state():
-    """Initialize the session state variables."""
     if 'audio_data' not in st.session_state:
         st.session_state.audio_data = None
     if 'last_audio_id' not in st.session_state:
@@ -123,13 +193,10 @@ def main():
     You can record audio directly in your browser or upload audio files.
     """)
     
-    # Initialize session state
     initialize_session_state()
     
-    # Create tabs with "Record Audio" first, followed by "Upload Files"
     tab1, tab2 = st.tabs(["Record Audio", "Upload Files"])
     
-    # Tab 1: Audio recording with streamlit-mic-recorder (now first)
     with tab1:
         st.subheader("Record Audio")
         
@@ -138,10 +205,8 @@ def main():
         When you click it again to stop recording, the audio will be automatically transcribed.
         """)
         
-        # Status area for feedback
         status_container = st.empty()
         
-        # Add the audio recorder with the correct parameters
         audio_data = mic_recorder(
             start_prompt="Start Recording",
             stop_prompt="Stop Recording",
@@ -150,64 +215,46 @@ def main():
             key="recorder"
         )
         
-        # Check if we have new audio data
         if audio_data and 'id' in audio_data and audio_data['id'] != st.session_state.last_audio_id:
-            # Update the last audio ID
             st.session_state.last_audio_id = audio_data['id']
             st.session_state.audio_data = audio_data
-            
-            # Set transcribing flag
             st.session_state.transcribing = True
-            
-            # Rerun to show the transcribing status
             st.rerun()
         
-        # If we're transcribing, process the audio
         if st.session_state.transcribing and st.session_state.audio_data:
-            # Show status
             with status_container:
                 st.info("Transcribing your recording... Please wait.")
             
-            # Play the audio for feedback
             st.audio(st.session_state.audio_data['bytes'], format="audio/wav")
             
-            # Transcribe the audio
             with st.spinner("Processing..."):
                 transcription = transcribe_audio(st.session_state.audio_data)
                 
                 if transcription:
-                    # Add to combined transcript (without timestamps/recording numbers, just with spacing)
                     if st.session_state.combined_transcript:
                         st.session_state.combined_transcript += f"\n\n{transcription.strip()}"
                     else:
                         st.session_state.combined_transcript = transcription.strip()
                     
-                    # Update status
                     with status_container:
                         st.success("Transcription complete! You can record another clip.")
                 else:
-                    # Update status
                     with status_container:
                         st.error("Transcription failed. Please try recording again.")
             
-            # Reset transcribing flag
             st.session_state.transcribing = False
         
-        # Display the combined transcript
         if st.session_state.combined_transcript:
             st.subheader("Transcript")
             
-            # Display the combined transcript
             st.text_area(
                 "Accumulated Transcriptions",
                 st.session_state.combined_transcript,
                 height=300
             )
             
-            # Column layout for buttons
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             
-            # Download button for the combined transcript
             with col1:
                 st.download_button(
                     "Download Transcript",
@@ -216,13 +263,14 @@ def main():
                     "text/plain"
                 )
             
-            # Clear transcript button
             with col2:
+                copy_to_clipboard_component(st.session_state.combined_transcript)
+            
+            with col3:
                 if st.button("Clear Transcript"):
                     st.session_state.combined_transcript = ""
                     st.rerun()
                 
-        # Provide a fallback message if the browser recording doesn't work
         with st.expander("Having trouble with recording?"):
             st.info("""
             If you're having trouble with the browser recording feature:
@@ -230,7 +278,6 @@ def main():
             2. Try using the "Upload Files" tab instead to upload pre-recorded audio
             """)
     
-    # Tab 2: File upload functionality (now second)
     with tab2:
         uploaded_files = st.file_uploader(
             "Choose audio files", 
