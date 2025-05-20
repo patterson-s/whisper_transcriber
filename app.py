@@ -8,9 +8,12 @@ import time
 from streamlit_mic_recorder import mic_recorder
 import datetime
 import streamlit.components.v1 as components
+import requests
+import json
 
 SUPPORTED_FORMATS = ['.mp3', '.m4a', '.wav', '.ogg', '.mp4']
 MODEL_NAME = "base"
+DISCORD_MESSAGE_LIMIT = 1900
 
 class AudioTranscriber:
     def __init__(self, model_name: str = MODEL_NAME):
@@ -28,6 +31,52 @@ class AudioTranscriber:
         except Exception as e:
             st.error(f"Error transcribing file: {str(e)}")
             return None
+
+def send_to_discord(transcript: str, source: str = "transcription") -> bool:
+    webhook_url = st.secrets.get("DISCORD_WEBHOOK_URL")
+    
+    if not webhook_url:
+        st.error("Discord webhook URL not configured")
+        return False
+    
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    header = f"🎤 **Whisper Transcription**\n📅 {timestamp}\n📝 Source: {source}\n\n"
+    
+    full_message = header + transcript
+    
+    if len(full_message) <= DISCORD_MESSAGE_LIMIT:
+        return send_single_message(webhook_url, full_message)
+    else:
+        return send_chunked_messages(webhook_url, header, transcript)
+
+def send_single_message(webhook_url: str, message: str) -> bool:
+    try:
+        data = {"content": message}
+        response = requests.post(webhook_url, json=data, timeout=10)
+        return response.status_code == 204
+    except Exception as e:
+        st.error(f"Error sending to Discord: {str(e)}")
+        return False
+
+def send_chunked_messages(webhook_url: str, header: str, transcript: str) -> bool:
+    try:
+        if not send_single_message(webhook_url, header):
+            return False
+        
+        chunk_size = DISCORD_MESSAGE_LIMIT - 50
+        chunks = [transcript[i:i+chunk_size] for i in range(0, len(transcript), chunk_size)]
+        
+        for i, chunk in enumerate(chunks):
+            message = f"**Part {i+1}/{len(chunks)}:**\n{chunk}"
+            if not send_single_message(webhook_url, message):
+                return False
+            time.sleep(0.5)
+        
+        return True
+    except Exception as e:
+        st.error(f"Error sending chunked messages: {str(e)}")
+        return False
 
 def copy_to_clipboard_component(text: str, button_text: str = "Copy to Clipboard"):
     escaped_text = text.replace('`', '\\`').replace('\\', '\\\\').replace('"', '\\"')
@@ -253,7 +302,7 @@ def main():
                 height=300
             )
             
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 st.download_button(
@@ -267,6 +316,14 @@ def main():
                 copy_to_clipboard_component(st.session_state.combined_transcript)
             
             with col3:
+                if st.button("Send to Discord", key="discord_recording"):
+                    with st.spinner("Sending to Discord..."):
+                        if send_to_discord(st.session_state.combined_transcript, "Microphone Recording"):
+                            st.success("✅ Sent to Discord!")
+                        else:
+                            st.error("❌ Failed to send to Discord")
+            
+            with col4:
                 if st.button("Clear Transcript"):
                     st.session_state.combined_transcript = ""
                     st.rerun()
@@ -295,12 +352,27 @@ def main():
                 
                 if transcriptions:
                     combined_text = "\n\n".join(f"{text}" for fname, text in transcriptions.items())
-                    st.download_button(
-                        "Download All Transcriptions",
-                        combined_text,
-                        "combined_transcriptions.txt",
-                        "text/plain"
-                    )
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.download_button(
+                            "Download All Transcriptions",
+                            combined_text,
+                            "combined_transcriptions.txt",
+                            "text/plain"
+                        )
+                    
+                    with col2:
+                        copy_to_clipboard_component(combined_text)
+                    
+                    with col3:
+                        if st.button("Send to Discord", key="discord_files"):
+                            with st.spinner("Sending to Discord..."):
+                                if send_to_discord(combined_text, "File Upload"):
+                                    st.success("✅ Sent to Discord!")
+                                else:
+                                    st.error("❌ Failed to send to Discord")
 
 if __name__ == "__main__":
     main()
